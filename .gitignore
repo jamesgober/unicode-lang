@@ -2,6 +2,15 @@
 /.dev
 /.claude
 
+# Raw Unicode Character Database (downloaded on demand by dev/gen_tables.rs;
+# the generated src/tables.rs is committed, the multi-megabyte source data is not)
+/dev/ucd/
+
+# Compiled table generator (source dev/gen_tables.rs is committed, the binary is not)
+/dev/gen_tables
+/dev/gen_tables.exe
+/dev/*.pdb
+
 # Rust / Cargo
 /target/
 **/*.rs.bk
