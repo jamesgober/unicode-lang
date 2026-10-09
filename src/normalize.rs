@@ -96,6 +96,11 @@ const S_COUNT: u32 = L_COUNT * N_COUNT; // 11172
 /// fast allocation-free scan (the Unicode quick-check), so passing text that is
 /// already normalized — the common case for ASCII and most well-formed input —
 /// costs one linear pass and a single allocation for the returned `String`.
+/// Pure-ASCII input is recognised by a word-at-a-time check and copied without
+/// consulting any table.
+///
+/// Normalization runs in `O(n log n)` time in the length of `s` even on hostile
+/// input such as a long run of combining marks with alternating classes.
 ///
 /// # Examples
 ///
@@ -114,6 +119,14 @@ const S_COUNT: u32 = L_COUNT * N_COUNT; // 11172
 /// ```
 #[must_use]
 pub fn normalize(s: &str, form: Form) -> String {
+    // Every pure-ASCII string is a fixed point of all four forms: no ASCII
+    // scalar decomposes or has a non-zero combining class, and no two ASCII
+    // scalars compose with each other.
+    // `str::is_ascii` checks a word at a time, far cheaper than the per-scalar
+    // quick-check.
+    if s.is_ascii() {
+        return String::from(s);
+    }
     if let Quick::Yes = quick_check(s, form) {
         return String::from(s);
     }
@@ -145,6 +158,10 @@ pub fn normalize(s: &str, form: Form) -> String {
 /// ```
 #[must_use]
 pub fn is_normalized(s: &str, form: Form) -> bool {
+    // ASCII is normalized under every form (see `normalize`).
+    if s.is_ascii() {
+        return true;
+    }
     match quick_check(s, form) {
         Quick::Yes => true,
         Quick::No => false,
@@ -182,6 +199,12 @@ fn quick_check(s: &str, form: Form) -> Quick {
     let mut last_ccc = 0u8;
     let mut result = Quick::Yes;
     for c in s.chars() {
+        // ASCII is a starter (class 0) with quick-check `Yes` in every form, so
+        // it only resets the ordering state; skip both table lookups.
+        if c.is_ascii() {
+            last_ccc = 0;
+            continue;
+        }
         let cc = ccc(c);
         // Marks out of canonical order prove the string is not normalized.
         if last_ccc > cc && cc != 0 {
@@ -217,6 +240,12 @@ fn decompose(s: &str, compat: bool) -> Vec<char> {
 /// Append the full decomposition of one scalar to `out`.
 fn decompose_char(c: char, compat: bool, out: &mut Vec<char>) {
     let cp = c as u32;
+    // No ASCII scalar has a canonical or compatibility decomposition (checked
+    // against the tables by `test_no_ascii_decompositions`).
+    if cp < 0x80 {
+        out.push(c);
+        return;
+    }
     if (S_BASE..S_BASE + S_COUNT).contains(&cp) {
         hangul_decompose(cp, out);
         return;
@@ -258,22 +287,52 @@ fn push_scalar(out: &mut Vec<char>, cp: u32) {
 }
 
 /// Reorder combining marks into canonical order: a stable sort by combining
-/// class within each run of non-starter scalars. Starters (class 0) are fixed
-/// points and act as barriers, so this is an insertion sort that never moves a
-/// mark past a starter.
+/// class within each maximal run of non-starter scalars. Starters (class 0) are
+/// fixed points and act as barriers, so marks never move past one.
+///
+/// Each run is scanned once; a run already in order (by far the common case —
+/// one or two marks, usually decomposed in order) is left untouched. Only a run
+/// with a descent is sorted, with the standard library's stable sort over
+/// `(class, scalar)` pairs so each class is looked up once. That bounds the
+/// whole pass at `O(n log n)` — an insertion sort here was `O(n²)` on a long run
+/// of marks whose classes alternate, which hostile identifiers can supply
+/// because combining marks are `XID_Continue`. The result is identical: both
+/// are stable sorts by class within the same runs.
 fn canonical_order(chars: &mut [char]) {
+    // Scratch for out-of-order runs, allocated on first use and reused.
+    let mut run: Vec<(u8, char)> = Vec::new();
     let n = chars.len();
-    let mut i = 1;
+    let mut i = 0;
     while i < n {
-        let cc = ccc(chars[i]);
-        if cc != 0 {
-            let mut j = i;
-            while j > 0 && ccc(chars[j - 1]) > cc {
-                chars.swap(j - 1, j);
-                j -= 1;
+        let first = ccc(chars[i]);
+        if first == 0 {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut prev = first;
+        let mut sorted = true;
+        i += 1;
+        while i < n {
+            let cc = ccc(chars[i]);
+            if cc == 0 {
+                break;
+            }
+            if cc < prev {
+                sorted = false;
+            }
+            prev = cc;
+            i += 1;
+        }
+        if !sorted {
+            let marks = &mut chars[start..i];
+            run.clear();
+            run.extend(marks.iter().map(|&c| (ccc(c), c)));
+            run.sort_by_key(|&(class, _)| class);
+            for (slot, &(_, c)) in marks.iter_mut().zip(run.iter()) {
+                *slot = c;
             }
         }
-        i += 1;
     }
 }
 
@@ -318,6 +377,13 @@ fn compose(chars: &mut Vec<char>) {
 /// exists: Hangul jamo by formula, everything else by table.
 fn primary_composite(a: char, b: char) -> Option<char> {
     let (ca, cb) = (a as u32, b as u32);
+
+    // No primary composite has an ASCII second element (checked against the
+    // table by `test_no_ascii_composition_tail`), and the Hangul vowel and
+    // trailing jamo are not ASCII either.
+    if cb < 0x80 {
+        return None;
+    }
 
     // Hangul: leading + vowel jamo -> LV syllable.
     if (L_BASE..L_BASE + L_COUNT).contains(&ca) && (V_BASE..V_BASE + V_COUNT).contains(&cb) {
@@ -404,6 +470,205 @@ mod tests {
                 let twice = normalize(&once, form);
                 assert_eq!(once, twice, "not idempotent: {s:?} {form:?}");
             }
+        }
+    }
+
+    /// The pre-1.0.1 canonical ordering (an insertion sort), kept as the
+    /// reference the replacement must match exactly.
+    fn canonical_order_reference(chars: &mut [char]) {
+        let n = chars.len();
+        let mut i = 1;
+        while i < n {
+            let cc = ccc(chars[i]);
+            if cc != 0 {
+                let mut j = i;
+                while j > 0 && ccc(chars[j - 1]) > cc {
+                    chars.swap(j - 1, j);
+                    j -= 1;
+                }
+            }
+            i += 1;
+        }
+    }
+
+    /// Scalars covering starters and non-starters, including several marks of
+    /// equal class (so stability is observable) and classes on both sides of
+    /// each other.
+    const ORDER_POOL: [char; 16] = [
+        'a',         // starter
+        'e',         // starter
+        '\u{0300}',  // 230
+        '\u{0301}',  // 230
+        '\u{0302}',  // 230
+        '\u{0316}',  // 220
+        '\u{0323}',  // 220
+        '\u{0327}',  // 202
+        '\u{0328}',  // 202
+        '\u{0334}',  // 1
+        '\u{0335}',  // 1
+        '\u{05B0}',  // 10
+        '\u{0345}',  // 240
+        '\u{1D16D}', // 226
+        '\u{0F71}',  // 129
+        '\u{1100}',  // starter (Hangul choseong)
+    ];
+
+    fn check_order_matches_reference(input: &[char]) {
+        let mut fast = input.to_vec();
+        let mut slow = input.to_vec();
+        canonical_order(&mut fast);
+        canonical_order_reference(&mut slow);
+        assert_eq!(fast, slow, "canonical order differs for {input:?}");
+    }
+
+    #[test]
+    fn test_canonical_order_matches_reference_exhaustive_small() {
+        // Every sequence of length 0..=4 over the pool (69 905 sequences).
+        let pool = ORDER_POOL;
+        let mut buf = [' '; 4];
+        for len in 0..=4u32 {
+            let total = pool.len().pow(len);
+            for mut idx in 0..total {
+                for slot in buf.iter_mut().take(len as usize) {
+                    *slot = pool[idx % pool.len()];
+                    idx /= pool.len();
+                }
+                check_order_matches_reference(&buf[..len as usize]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_canonical_order_long_alternating_run() {
+        let mut input = alloc::vec!['a'];
+        for i in 0..2_000 {
+            input.push(if i % 2 == 0 { '\u{0301}' } else { '\u{0323}' });
+        }
+        input.push('b');
+        input.extend_from_slice(&['\u{0300}', '\u{0316}', '\u{0301}', '\u{0323}']);
+        check_order_matches_reference(&input);
+    }
+
+    #[test]
+    fn test_canonical_order_is_stable_within_class() {
+        // U+0301 and U+0300 share class 230 and must keep their relative order
+        // when the class-220 mark moves in front of them.
+        let mut v = alloc::vec!['a', '\u{0301}', '\u{0300}', '\u{0323}'];
+        canonical_order(&mut v);
+        assert_eq!(v, ['a', '\u{0323}', '\u{0301}', '\u{0300}']);
+    }
+
+    #[test]
+    fn test_canonical_order_run_at_buffer_edges() {
+        // A run at the very start (no starter before it) and one at the end.
+        check_order_matches_reference(&[
+            '\u{0301}', '\u{0323}', '\u{0327}', 'a', '\u{0345}', '\u{0334}',
+        ]);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn prop_canonical_order_matches_reference(
+            picks in proptest::collection::vec(0usize..ORDER_POOL.len(), 0..64)
+        ) {
+            let input: Vec<char> = picks.iter().map(|&i| ORDER_POOL[i]).collect();
+            let mut fast = input.clone();
+            let mut slow = input;
+            canonical_order(&mut fast);
+            canonical_order_reference(&mut slow);
+            proptest::prop_assert_eq!(fast, slow);
+        }
+
+        #[test]
+        fn prop_canonical_order_matches_reference_any_scalar(
+            input in proptest::collection::vec(proptest::prelude::any::<char>(), 0..48)
+        ) {
+            let mut fast = input.clone();
+            let mut slow = input;
+            canonical_order(&mut fast);
+            canonical_order_reference(&mut slow);
+            proptest::prop_assert_eq!(fast, slow);
+        }
+    }
+
+    /// A plain binary search over a `(start, end, value)` table with no fast
+    /// path: the reference `range_value` must agree with.
+    fn range_value_reference(cp: u32, table: &[(u32, u32, u8)]) -> u8 {
+        let idx = table.partition_point(|&(_, end, _)| end < cp);
+        match table.get(idx) {
+            Some(&(start, _, value)) if cp >= start => value,
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn test_range_value_fast_path_exhaustive() {
+        // The sub-0x80 shortcut in `range_value` (combining class and every
+        // quick-check table) agrees with the full lookup at every code point.
+        let tables_under_test = [
+            tables::CCC,
+            tables::NFC_QC,
+            tables::NFD_QC,
+            tables::NFKC_QC,
+            tables::NFKD_QC,
+        ];
+        for table in tables_under_test {
+            for cp in 0u32..=0x10_FFFF {
+                assert_eq!(
+                    range_value(cp, table),
+                    range_value_reference(cp, table),
+                    "{cp:#X}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_ascii_decompositions() {
+        // Justifies the ASCII shortcut in `decompose_char`.
+        assert!(tables::CANON_DECOMP.iter().all(|&(cp, _, _)| cp >= 0x80));
+        assert!(tables::COMPAT_DECOMP.iter().all(|&(cp, _, _)| cp >= 0x80));
+    }
+
+    #[test]
+    fn test_no_ascii_composition_tail() {
+        // Justifies the ASCII shortcut in `primary_composite`: no table pair
+        // has an ASCII second element, so skipping the search changes nothing.
+        assert!(
+            tables::COMPOSE
+                .iter()
+                .all(|&(key, _)| (key & 0xFFFF_FFFF) >= 0x80)
+        );
+    }
+
+    #[test]
+    fn test_decompose_char_ascii_is_identity() {
+        for c in '\0'..='\u{7F}' {
+            for compat in [false, true] {
+                let mut out = Vec::new();
+                decompose_char(c, compat, &mut out);
+                assert_eq!(out, [c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_ascii_fast_paths_agree_with_general_path() {
+        for c in '\0'..='\u{7F}' {
+            // Pure ASCII: the whole-string shortcut.
+            let alone = alloc::format!("{c}");
+            for form in [Form::Nfc, Form::Nfd, Form::Nfkc, Form::Nfkd] {
+                assert_eq!(normalize(&alone, form), alone);
+                assert!(is_normalized(&alone, form));
+                assert!(matches!(quick_check(&alone, form), Quick::Yes));
+            }
+            // Mixed: forces the general path through an ASCII scalar placed
+            // between a mark and a base that composes.
+            let mixed = alloc::format!("e\u{0301}{c}A\u{0300}");
+            assert_eq!(normalize(&mixed, Form::Nfc), alloc::format!("é{c}À"));
+            assert_eq!(normalize(&mixed, Form::Nfd), mixed);
+            assert!(is_normalized(&mixed, Form::Nfd));
+            assert!(!is_normalized(&mixed, Form::Nfc));
         }
     }
 

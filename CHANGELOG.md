@@ -21,6 +21,51 @@
 
 ---
 
+## [1.0.1] - 2026-10-08
+
+Hardening patch from the LexerSketch audit. No public API change, and
+normalization output is byte-identical (the full `NormalizationTest.txt` suite
+passes unchanged).
+
+### Changed
+
+- **ASCII fast paths.** `is_xid_start`, `is_xid_continue`, and `char_width`
+  answer ASCII without a table lookup; `is_xid` and `str_width` check
+  pure-ASCII strings a byte at a time; `normalize` and `is_normalized`
+  recognise pure-ASCII input up front and do no per-scalar work, and inside
+  mixed text ASCII skips the quick-check, decomposition, and composition
+  lookups. Results are unchanged: each shortcut is tested against the table at
+  every code point. `str_width` over 4 KiB of ASCII is about 30× faster,
+  `is_xid` on an ASCII identifier about 8×.
+- Test and bench targets now build without default features: the
+  normalization tests are gated on `alloc` and the bench requires it.
+- `dev/gen_tables.rs` documents the actual regeneration steps.
+
+### Fixed
+
+- The crate-level doctest used `normalize` unconditionally and failed under
+  `--no-default-features`.
+
+### Security
+
+- **Quadratic normalization (H11).** Canonical ordering was an insertion sort,
+  so a long run of combining marks with alternating classes cost `O(n²)`.
+  Marks are `XID_Continue`, so a hostile identifier reached it: one letter plus
+  256 000 marks took 57 s to normalize, and a million about ten minutes. Each
+  out-of-order run of non-starters is now sorted once with a stable sort, which
+  bounds normalization at `O(n log n)`; the million-mark input takes 24 ms.
+  Output is identical: the old sort is kept in the tests as a reference.
+  `tests/adversarial.rs` pins exact output and near-linear scaling.
+- **Conformance in CI (M67).** The full `NormalizationTest.txt` suite skipped
+  silently when the data was absent, so CI never ran it. CI now downloads the
+  file with `dev/fetch_ucd.sh` (pinned to Unicode 16.0.0, checked against the
+  SHA-256 in `dev/ucd.sha256`) and sets `UNICODE_LANG_REQUIRE_UCD=1`, which
+  makes missing data a failure. A local run without the data prints a visible
+  skip notice. The test also checks the file's version header against
+  `UNICODE_VERSION` and its record count.
+
+---
+
 ## [1.0.0] - 2026-07-01
 
 API freeze. The public surface introduced in 0.2.0 — the eight functions
@@ -91,7 +136,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/unicode-lang/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jamesgober/unicode-lang/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/jamesgober/unicode-lang/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jamesgober/unicode-lang/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/jamesgober/unicode-lang/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jamesgober/unicode-lang/releases/tag/v0.1.0

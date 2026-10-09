@@ -38,7 +38,7 @@
         <strong>unicode-lang</strong> answers the three Unicode questions a lexer has to ask that the standard library will not: <em>may this scalar start or continue an identifier?</em> (<a href="https://www.unicode.org/reports/tr31/">UAX&nbsp;#31</a>), <em>are these two strings the same once normalized?</em> (<a href="https://www.unicode.org/reports/tr15/">UAX&nbsp;#15</a>), and <em>how many columns does this text occupy?</em> (<a href="https://www.unicode.org/reports/tr11/">UAX&nbsp;#11</a>).
     </p>
     <p>
-        Every answer comes from compact, sorted lookup tables generated directly from the <b>Unicode Character Database</b>, so the crate carries <b>no third-party dependencies</b> and every query is a branch-predictable binary search. It is <b><code>no_std</code></b>: identifier and width checks need no allocator at all; normalization allocates only its output. Normalization is verified against the official <code>NormalizationTest.txt</code> conformance suite — every one of its ~19&nbsp;000 vectors plus the whole-codespace identity rule.
+        Every answer comes from compact, sorted lookup tables generated directly from the <b>Unicode Character Database</b>, so the crate carries <b>no third-party dependencies</b>. ASCII is answered directly without touching a table; every other query is a branch-predictable binary search. Normalization runs in <code>O(n log n)</code> time even on hostile input, such as a million combining marks with alternating classes. It is <b><code>no_std</code></b>: identifier and width checks need no allocator at all; normalization allocates only its output. Normalization is verified against the official <code>NormalizationTest.txt</code> conformance suite — every one of its ~19&nbsp;000 vectors plus the whole-codespace identity rule.
     </p>
     <p>
         The whole crate is <b>safe Rust</b> — <code>#![forbid(unsafe_code)]</code>. It owns Unicode rules and nothing else; a lexer, a symbol table, or a terminal renderer composes it with the rest of the family.
@@ -50,17 +50,20 @@
 
 ## Performance First
 
-Identifier and width queries are single-digit nanoseconds; normalization is dominated by its one output allocation and short-circuits when the input is already normalized. Latest local Criterion means (`cargo bench --bench bench`, Windows x86_64, Rust stable, release build):
+ASCII is answered without touching a table, so identifier and width queries on source text are sub-nanosecond to a few nanoseconds per scalar; non-ASCII lookups are single-digit nanoseconds. Normalization recognises ASCII and already-normalized text up front, and stays `O(n log n)` on hostile input. Criterion means from the 1.0.1 run (`cargo bench --bench bench`, Windows x86_64, Rust stable, release build, on a busy machine; [the 1.0.1 release notes](./docs/release/v1.0.1.md) compare with 1.0.0 under the same conditions):
 
-| Operation                                   | Time      |
-|---------------------------------------------|----------:|
-| `is_xid_start` / `is_xid_continue`          |  ~3.2 ns  |
-| `is_xid` (11-scalar identifier)             |  ~37 ns   |
-| `char_width` (per scalar)                   |  ~5.2 ns  |
-| `str_width` (mixed 48-column string)        |  ~288 ns  |
-| `normalize` (ASCII, already normalized)     |  ~33 ns   |
-| `normalize` (mixed scripts → NFC)           |  ~128 ns  |
-| `is_normalized` (ASCII → NFC)               |  ~13 ns   |
+| Operation                                          | Time      |
+|----------------------------------------------------|----------:|
+| `is_xid_start` / `is_xid_continue` (ASCII)         |  ~0.8 ns  |
+| `is_xid_start` / `is_xid_continue` (non-ASCII)     |  ~5.8 ns  |
+| `is_xid` (16-byte ASCII identifier)                |  ~12 ns   |
+| `char_width` (ASCII / wide CJK)                    |  ~0.5 / ~7.6 ns |
+| `str_width` (4 KiB ASCII)                          |  ~1.3 µs  |
+| `str_width` (mixed 48-column string)               |  ~135 ns  |
+| `normalize` (4 KiB ASCII, already normalized)      |  ~103 ns  |
+| `normalize` (mixed scripts → NFC)                  |  ~210 ns  |
+| `is_normalized` (4 KiB ASCII → NFC)                |  ~59 ns   |
+| `normalize` (`a` + 16 000 alternating marks → NFD) |  ~500 µs  |
 
 Numbers vary by CPU and environment; run the suite on your target to establish a baseline. Data is generated from **Unicode 16.0.0** (`UNICODE_VERSION`).
 
@@ -190,14 +193,14 @@ cargo test --all-features  # adds the serde-gated paths
 cargo bench --bench bench  # Criterion benchmarks
 ```
 
-The property suite in [`tests/proptests.rs`](./tests/proptests.rs) checks the algebraic laws — normalization is idempotent and stable, the forms compose as UAX #15 requires, and width is additive. [`tests/conformance.rs`](./tests/conformance.rs) always runs a curated set of hard cases, and runs the **entire** official `NormalizationTest.txt` suite whenever the UCD data is present locally or in CI.
+The property suite in [`tests/proptests.rs`](./tests/proptests.rs) checks the algebraic laws — normalization is idempotent and stable, the forms compose as UAX #15 requires, and width is additive. [`tests/conformance.rs`](./tests/conformance.rs) always runs a curated set of hard cases, and runs the **entire** official `NormalizationTest.txt` suite from `dev/ucd/`. CI downloads that file (pinned to Unicode 16.0.0 and checked against the SHA-256 in [`dev/ucd.sha256`](./dev/ucd.sha256)) and sets `UNICODE_LANG_REQUIRE_UCD=1`, so a missing file fails the build. Locally, fetch it with `sh dev/fetch_ucd.sh NormalizationTest.txt`; without it the test passes and prints a skip notice. [`tests/adversarial.rs`](./tests/adversarial.rs) bounds hostile input: a million combining marks of alternating classes must normalize exactly, and eight times the input must cost far less than the 64 times a quadratic sort would.
 
 <hr>
 <br>
 
 ## Cross-Platform Support
 
-The crate is pure table lookups with no platform-specific code, so it behaves identically everywhere Rust runs. CI covers **Linux**, **macOS**, and **Windows** on both stable and the 1.85 MSRV; the full conformance suite is validated on Windows and Linux (WSL2 Ubuntu).
+The crate is pure table lookups with no platform-specific code, so it behaves identically everywhere Rust runs. CI covers **Linux**, **macOS**, and **Windows** on both stable and the 1.85 MSRV, and runs the full conformance suite on every one of them.
 
 <hr>
 <br>

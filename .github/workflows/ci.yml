@@ -17,6 +17,9 @@ jobs:
   test:
     name: Test (${{ matrix.os }} / ${{ matrix.rust }})
     runs-on: ${{ matrix.os }}
+    env:
+      # tests/conformance.rs fails instead of skipping when the data is absent.
+      UNICODE_LANG_REQUIRE_UCD: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +32,12 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # The full NormalizationTest.txt conformance suite needs UCD data that is
+      # not committed. Fetch the pinned 16.0.0 file, verified against the
+      # SHA-256 in dev/ucd.sha256, and make its absence a test failure.
+      - name: Fetch UCD conformance data
+        shell: bash
+        run: sh dev/fetch_ucd.sh NormalizationTest.txt
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (default features)

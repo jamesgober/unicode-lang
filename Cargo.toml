@@ -3,7 +3,7 @@
 # =============================================================================
 [package]
 name    = "unicode-lang"
-version = "1.0.0"
+version = "1.0.1"
 
 # Minimum Supported Rust Version (MSRV)
 rust-version = "1.85"
@@ -79,6 +79,8 @@ loom = "0.7"
 [[bench]]
 name    = "bench"
 harness = false
+# The benchmarks cover normalization, which needs an allocator.
+required-features = ["alloc"]
 
 
 # RELEASE PROFILE

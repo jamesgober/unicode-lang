@@ -41,6 +41,20 @@ use crate::tables;
 #[must_use]
 pub fn char_width(c: char) -> usize {
     let cp = c as u32;
+    // Printable ASCII is one column and the C0 controls are zero. DEL (0x7F)
+    // begins the C1 control range, so it takes the general path. Checked
+    // against the tables at every code point by
+    // `test_fast_path_matches_tables_exhaustive`.
+    if cp < 0x7F {
+        return usize::from(cp >= 0x20);
+    }
+    width_from_tables(cp)
+}
+
+/// Column width from the control ranges and the generated tables, with no
+/// ASCII shortcut.
+#[inline]
+fn width_from_tables(cp: u32) -> usize {
     // The C0 (< 0x20, includes NUL) and C1 (0x7F..=0x9F) control blocks have no
     // printable advance. They are not in the zero-width table (that is combining
     // and format characters), so they are handled explicitly.
@@ -74,6 +88,11 @@ pub fn char_width(c: char) -> usize {
 #[inline]
 #[must_use]
 pub fn str_width(s: &str) -> usize {
+    // Pure ASCII: every byte is one column except the C0 controls and DEL. A
+    // byte count needs no UTF-8 decoding.
+    if s.is_ascii() {
+        return s.bytes().filter(|&b| b >= 0x20 && b != 0x7F).count();
+    }
     s.chars().map(char_width).sum()
 }
 
@@ -116,6 +135,38 @@ mod tests {
     fn test_soft_hyphen_is_one() {
         // SOFT HYPHEN is category Cf but occupies a column when displayed.
         assert_eq!(char_width('\u{00AD}'), 1);
+    }
+
+    #[test]
+    fn test_fast_path_matches_tables_exhaustive() {
+        for cp in 0u32..=0x10_FFFF {
+            if let Some(c) = char::from_u32(cp) {
+                assert_eq!(char_width(c), width_from_tables(cp), "{cp:#X}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_str_width_ascii_path_matches_per_scalar() {
+        // Every ASCII byte, alone and all 128 together.
+        let mut all = [0u8; 128];
+        for (slot, b) in all.iter_mut().zip(0u8..) {
+            *slot = b;
+        }
+        let whole = core::str::from_utf8(&all).unwrap_or_default();
+        assert_eq!(whole.len(), 128);
+        let per_scalar: usize = whole.chars().map(|c| width_from_tables(c as u32)).sum();
+        assert_eq!(str_width(whole), per_scalar);
+        for c in whole.chars() {
+            let mut b = [0u8; 4];
+            assert_eq!(
+                str_width(c.encode_utf8(&mut b)),
+                width_from_tables(c as u32),
+                "{c:?}"
+            );
+        }
+        // Mixed input takes the per-scalar path.
+        assert_eq!(str_width("a\u{7F}世\t"), 3);
     }
 
     #[test]

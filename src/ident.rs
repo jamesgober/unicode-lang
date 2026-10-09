@@ -37,7 +37,19 @@ use crate::tables;
 #[inline]
 #[must_use]
 pub fn is_xid_start(c: char) -> bool {
-    in_ranges(c as u32, tables::XID_START)
+    // In ASCII, XID_Start is exactly the letters; answering directly skips the
+    // binary search for the overwhelmingly common case. Checked against the
+    // table at every code point by `test_fast_paths_match_tables_exhaustive`.
+    if c.is_ascii() {
+        return c.is_ascii_alphabetic();
+    }
+    xid_start_table(c as u32)
+}
+
+/// Table lookup for `XID_Start`, with no fast path.
+#[inline]
+fn xid_start_table(cp: u32) -> bool {
+    in_ranges(cp, tables::XID_START)
 }
 
 /// Returns `true` if `c` may continue a Unicode identifier — that is, if `c`
@@ -64,7 +76,17 @@ pub fn is_xid_start(c: char) -> bool {
 #[inline]
 #[must_use]
 pub fn is_xid_continue(c: char) -> bool {
-    in_ranges(c as u32, tables::XID_CONTINUE)
+    // In ASCII, XID_Continue is exactly the alphanumerics plus `_`.
+    if c.is_ascii() {
+        return c.is_ascii_alphanumeric() || c == '_';
+    }
+    xid_continue_table(c as u32)
+}
+
+/// Table lookup for `XID_Continue`, with no fast path.
+#[inline]
+fn xid_continue_table(cp: u32) -> bool {
+    in_ranges(cp, tables::XID_CONTINUE)
 }
 
 /// Returns `true` if `s` is a well-formed Unicode identifier under the default
@@ -93,6 +115,17 @@ pub fn is_xid_continue(c: char) -> bool {
 /// ```
 #[must_use]
 pub fn is_xid(s: &str) -> bool {
+    // Pure-ASCII identifiers (the common case in source code) are checked a
+    // byte at a time, with no UTF-8 decoding and no table lookups.
+    if s.is_ascii() {
+        return match s.as_bytes().split_first() {
+            Some((first, rest)) => {
+                first.is_ascii_alphabetic()
+                    && rest.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+            }
+            None => false,
+        };
+    }
     let mut chars = s.chars();
     match chars.next() {
         Some(first) => is_xid_start(first) && chars.all(is_xid_continue),
@@ -148,6 +181,66 @@ mod tests {
     #[test]
     fn test_is_xid_rejects_digit_start() {
         assert!(!is_xid("1st"));
+    }
+
+    #[test]
+    fn test_fast_paths_match_tables_exhaustive() {
+        // The ASCII shortcuts must agree with the generated tables at every
+        // scalar value; above ASCII they are the table, so this also pins the
+        // dispatch.
+        for cp in 0u32..=0x10_FFFF {
+            let Some(c) = char::from_u32(cp) else {
+                continue;
+            };
+            assert_eq!(is_xid_start(c), xid_start_table(cp), "start {cp:#X}");
+            assert_eq!(
+                is_xid_continue(c),
+                xid_continue_table(cp),
+                "continue {cp:#X}"
+            );
+        }
+    }
+
+    /// `is_xid` per scalar over the table lookups, with no shortcut.
+    fn is_xid_reference(s: &str) -> bool {
+        let mut chars = s.chars();
+        match chars.next() {
+            Some(first) => {
+                xid_start_table(first as u32) && chars.all(|c| xid_continue_table(c as u32))
+            }
+            None => false,
+        }
+    }
+
+    #[test]
+    fn test_is_xid_ascii_path_matches_reference_exhaustive() {
+        // Every ASCII string of length 1 and 2, alone and after a valid
+        // identifier prefix ("id").
+        let mut buf = [b'i', b'd', 0, 0];
+        for a in 0u8..0x80 {
+            let one = [a];
+            let s = core::str::from_utf8(&one).unwrap_or_default();
+            assert_eq!(is_xid(s), is_xid_reference(s), "{s:?}");
+            for b in 0u8..0x80 {
+                buf[2] = a;
+                buf[3] = b;
+                for bytes in [&buf[2..], &buf[..]] {
+                    let s = core::str::from_utf8(bytes).unwrap_or_default();
+                    assert_eq!(is_xid(s), is_xid_reference(s), "{s:?}");
+                }
+            }
+        }
+        // Non-ASCII strings take the general path.
+        for s in [
+            "café",
+            "a\u{0301}",
+            "\u{0301}a",
+            "x_\u{0660}",
+            "日本",
+            "a b\u{00E9}",
+        ] {
+            assert_eq!(is_xid(s), is_xid_reference(s), "{s:?}");
+        }
     }
 
     #[test]

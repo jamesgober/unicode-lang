@@ -5,13 +5,21 @@
 //! against regressions with no external data.
 //!
 //! `full_conformance_suite` runs the complete official `NormalizationTest.txt`
-//! when it is available on disk — locally under `dev/ucd/` after the generator
-//! download step, or in CI when the UCD is present. It exercises every one of
-//! the ~19 000 published test vectors plus the whole-codespace identity rule
-//! (every code point not named in Part 1 must be a fixed point of all four
-//! forms). When the file is absent the test is skipped, so the suite stays
-//! green without committing the multi-megabyte data file.
+//! from `dev/ucd/` — every one of its ~19 000 published test vectors plus the
+//! whole-codespace identity rule (every code point not named in Part 1 must be
+//! a fixed point of all four forms). The data is not committed (it is
+//! multi-megabyte and gitignored); fetch it, pinned and SHA-256 verified, with
+//!
+//! ```text
+//! sh dev/fetch_ucd.sh NormalizationTest.txt
+//! ```
+//!
+//! CI runs that script and sets `UNICODE_LANG_REQUIRE_UCD=1`, which turns a
+//! missing file into a test **failure**. Without the variable (a local run
+//! with no data) the test passes with a skip notice written straight to
+//! stderr, so it shows even though the test harness captures output.
 
+#![cfg(feature = "alloc")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use unicode_lang::{Form, normalize};
@@ -107,13 +115,51 @@ fn curated_cases() {
     }
 }
 
+/// Set (to anything but `0`) to make missing conformance data a failure.
+const REQUIRE_UCD: &str = "UNICODE_LANG_REQUIRE_UCD";
+
+fn ucd_required() -> bool {
+    std::env::var_os(REQUIRE_UCD).is_some_and(|v| !v.is_empty() && v != "0")
+}
+
 #[test]
 fn full_conformance_suite() {
-    let path = std::path::Path::new("dev/ucd/NormalizationTest.txt");
-    let Ok(text) = std::fs::read_to_string(path) else {
-        eprintln!("skipping full conformance: {} not present", path.display());
-        return;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("dev")
+        .join("ucd")
+        .join("NormalizationTest.txt");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) => {
+            assert!(
+                !ucd_required(),
+                "{REQUIRE_UCD} is set but {} could not be read ({err}); \
+                 fetch it with `sh dev/fetch_ucd.sh NormalizationTest.txt`",
+                path.display()
+            );
+            // Written to the stderr handle directly, not through `eprintln!`,
+            // so the notice is not swallowed by the harness's output capture.
+            use std::io::Write as _;
+            let _ = writeln!(
+                std::io::stderr(),
+                "\nSKIPPED full NormalizationTest.txt conformance: {} not present ({err}).\n\
+                 Run `sh dev/fetch_ucd.sh NormalizationTest.txt` to enable it \
+                 (CI sets {REQUIRE_UCD}=1 and fails instead of skipping).",
+                path.display()
+            );
+            return;
+        }
     };
+
+    // The data must be the release the tables were generated from.
+    let (major, minor, patch) = unicode_lang::UNICODE_VERSION;
+    let expected_header = format!("# NormalizationTest-{major}.{minor}.{patch}.txt");
+    let header = text.lines().next().unwrap_or("");
+    assert_eq!(
+        header.trim_end(),
+        expected_header,
+        "conformance data does not match UNICODE_VERSION"
+    );
 
     let mut part1_singletons: std::collections::HashSet<u32> = std::collections::HashSet::new();
     let mut in_part1 = false;
@@ -151,7 +197,9 @@ fn full_conformance_suite() {
         records += 1;
     }
 
-    assert!(records > 15_000, "unexpectedly few records: {records}");
+    // NormalizationTest-16.0.0.txt has 19 965 records (Parts 0-3); a short
+    // count means a truncated or wrong file, not a pass.
+    assert!(records > 19_000, "unexpectedly few records: {records}");
 
     // Whole-codespace identity: any code point not named in Part 1 is a fixed
     // point of all four forms.

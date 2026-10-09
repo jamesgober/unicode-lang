@@ -19,7 +19,7 @@ normalization, and display width — from tables generated directly from the
 Unicode Character Database, with no third-party dependencies. The whole public
 surface is eight free functions, one selector enum, and one version constant.
 
-- **Version:** 1.0.0
+- **Version:** 1.0.1
 - **Unicode data:** 16.0.0 (see [`UNICODE_VERSION`](#unicode_version))
 - **MSRV:** Rust 1.85 (2024 edition)
 - **`no_std`:** yes — identifiers and width need no allocator; normalization needs `alloc`
@@ -436,7 +436,13 @@ Returns `s` normalized to `form`. When `s` is already in the requested form
 this returns it unchanged after a fast allocation-free scan (the Unicode
 quick-check), so passing already-normalized text — the common case for ASCII and
 most well-formed input — costs one linear pass plus the single allocation for
-the returned `String`.
+the returned `String`. Pure-ASCII input is recognised a word at a time and
+copied without consulting any table.
+
+Normalization runs in `O(n log n)` time in the length of `s`, including on
+hostile input such as one base letter followed by a million combining marks
+whose classes alternate (marks are `XID_Continue`, so such a string can be an
+identifier). Before 1.0.1 that input was quadratic.
 
 **Parameters**
 
@@ -588,8 +594,10 @@ generator that reads the Unicode Character Database text files
 (`UnicodeData`, `DerivedCoreProperties`, `DerivedNormalizationProps`,
 `EastAsianWidth`) and emits `src/tables.rs`. The shipped crate contains only the
 generated data, so there is no build-time download and no runtime dependency.
-A lookup is a single `partition_point` binary search — branch-predictable and
-cache-friendly. Regenerating against a newer Unicode release is one command;
+ASCII is answered directly by every entry point — no table is consulted, and
+the string functions check pure-ASCII input a word or a byte at a time; tests
+compare each shortcut with the table at every code point. Any other lookup is a
+single `partition_point` binary search — branch-predictable and cache-friendly. Regenerating against a newer Unicode release is one command;
 [`UNICODE_VERSION`](#unicode_version) records which release a build carries.
 
 ### The width contract
@@ -604,7 +612,8 @@ narrow, and grapheme clustering is out of scope — see [Display width](#width).
 
 `normalize` runs the standard UAX #15 pipeline: full canonical (or
 compatibility) decomposition of every scalar, a stable sort of combining marks
-by canonical combining class, and — for the composing forms — recomposition
+by canonical combining class within each run of non-starters (runs already in
+order, the usual case, are only scanned; others are sorted in `O(k log k)`), and — for the composing forms — recomposition
 through the primary-composite table. Hangul syllables are decomposed and
 composed by formula rather than table. `is_normalized` and the fast path in
 `normalize` use the quick-check algorithm over the per-form `*_QC` properties and
@@ -616,10 +625,13 @@ normalizing pass with no intermediate `String`.
 The normalization implementation is validated against the official
 `NormalizationTest.txt` from the UCD: every one of its ~19 000 published test
 vectors across all four forms, plus the whole-codespace identity rule (every
-code point not named in the test file is a fixed point of all four forms). The
-suite runs in CI whenever the UCD data is present, and a curated subset of hard
-cases (canonical ordering, Hangul LV/LVT, compatibility folds, partial
-composition) runs unconditionally.
+code point not named in the test file is a fixed point of all four forms). CI
+downloads the file (pinned to Unicode 16.0.0, verified against the SHA-256 in
+`dev/ucd.sha256`) on every platform and fails if it is missing; locally,
+`sh dev/fetch_ucd.sh NormalizationTest.txt` fetches it, and without it the test
+prints a skip notice. A curated subset of hard cases (canonical ordering, Hangul
+LV/LVT, compatibility folds, partial composition) runs unconditionally, and
+`tests/adversarial.rs` bounds the time of hostile combining-mark runs.
 
 <br>
 <hr>

@@ -2,7 +2,8 @@
 //!
 //! Every table is a sorted, non-overlapping list of inclusive code point
 //! ranges, so membership and value lookups are a single `partition_point`
-//! search — branch-predictable and cache-friendly, with no allocation.
+//! search — branch-predictable and cache-friendly, with no allocation. The
+//! public entry points answer ASCII before reaching these helpers.
 
 /// Returns `true` when `cp` falls inside any `(start, end)` range in `table`.
 #[inline]

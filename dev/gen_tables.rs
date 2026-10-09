@@ -9,10 +9,15 @@
 //! reproducibility and auditability. Regenerate with:
 //!
 //! ```text
-//! # from the crate root, with dev/ucd/ populated (see dev/README or the
-//! # curl commands in the v0.2.0 release notes):
+//! # from the crate root; fetches the pinned UCD files into dev/ucd/ and
+//! # verifies them against dev/ucd.sha256:
+//! sh dev/fetch_ucd.sh
 //! rustc -O dev/gen_tables.rs -o dev/gen_tables && ./dev/gen_tables
+//! rustfmt --edition 2024 src/tables.rs
 //! ```
+//!
+//! With the pinned data, the output is byte-identical to the committed
+//! `src/tables.rs` (checked for 1.0.1).
 //!
 //! Uses only `std`.
 

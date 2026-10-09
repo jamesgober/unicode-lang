@@ -9,8 +9,10 @@
 //! these two strings the same once normalized?* (UAX #15), and *how many
 //! columns does this text occupy?* (UAX #11). `unicode-lang` answers all three
 //! from compact lookup tables generated directly from the Unicode Character
-//! Database, so the crate carries no runtime dependencies and every query is a
-//! branch-predictable binary search.
+//! Database, so the crate carries no runtime dependencies. ASCII is answered
+//! directly, without touching a table; every other query is a
+//! branch-predictable binary search. Normalization is `O(n log n)` even on
+//! hostile input such as a million combining marks of alternating classes.
 //!
 //! ## At a glance
 //!
@@ -27,16 +29,17 @@
 //! ## Example
 //!
 //! ```
-//! use unicode_lang::{char_width, is_xid, normalize, Form};
+//! use unicode_lang::{char_width, is_xid};
 //!
 //! // Recognise an identifier that mixes scripts.
 //! assert!(is_xid("Δpressure"));
 //!
-//! // Fold a compatibility ligature and recompose.
-//! assert_eq!(normalize("ﬁle", Form::Nfkc), "file");
-//!
 //! // Measure a mixed-width string for column alignment.
 //! assert_eq!(char_width('世'), 2);
+//!
+//! // Fold a compatibility ligature and recompose (needs `alloc`, the default).
+//! # #[cfg(feature = "alloc")]
+//! assert_eq!(unicode_lang::normalize("ﬁle", unicode_lang::Form::Nfkc), "file");
 //! ```
 //!
 //! ## `no_std`
