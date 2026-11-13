@@ -18,6 +18,10 @@
 //!
 //! - **Identifiers** — [`is_xid_start`], [`is_xid_continue`], and the
 //!   whole-string [`is_xid`] implement the UAX #31 `XID` profile.
+//! - **Invisible characters**: [`is_default_ignorable`] and
+//!   [`first_default_ignorable`] find characters that render as nothing, such
+//!   as ZERO WIDTH JOINER and the Hangul fillers. UAX #31 lets some of them into
+//!   identifiers, so a lexer should check accepted names with these.
 //! - **Width** — [`char_width`] and [`str_width`] give monospace column counts
 //!   (0 / 1 / 2), `wcwidth`-style.
 //! - **Normalization** — [`normalize`] and [`is_normalized`], selected by
@@ -67,6 +71,7 @@
 #![deny(clippy::unreachable)]
 
 mod ident;
+mod ignorable;
 mod lookup;
 mod tables;
 mod width;
@@ -75,6 +80,7 @@ mod width;
 mod normalize;
 
 pub use ident::{is_xid, is_xid_continue, is_xid_start};
+pub use ignorable::{first_default_ignorable, is_default_ignorable};
 pub use tables::UNICODE_VERSION;
 pub use width::{char_width, str_width};
 

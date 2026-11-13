@@ -73,6 +73,7 @@ Numbers vary by CPU and environment; run the suite on your target to establish a
 ## Features
 
 - **Identifier rules** — `is_xid_start`, `is_xid_continue`, and the whole-string `is_xid` implement the UAX #31 `XID` profile a lexer needs.
+- **Invisible characters**: `is_default_ignorable` and `first_default_ignorable` find zero-width joiners, Hangul fillers and other characters that render as nothing. UAX #31 lets some of them into identifiers, so a lexer can use these to reject look-alike names.
 - **Normalization** — all four forms (NFC, NFD, NFKC, NFKD) through one `normalize`, plus a fast `is_normalized` quick-check. Verified against the official conformance suite.
 - **Display width** — `char_width` and `str_width` give monospace column counts (0 / 1 / 2), `wcwidth`-style.
 - **No dependencies** — tables are generated from the UCD and embedded; nothing is pulled in at build time.
@@ -168,6 +169,7 @@ The tables are produced by `dev/gen_tables.rs`, a committed, dependency-free gen
 For the complete reference with examples, see [`docs/API.md`](./docs/API.md).
 
 - [`is_xid_start`](./docs/API.md#is_xid_start) / [`is_xid_continue`](./docs/API.md#is_xid_continue) / [`is_xid`](./docs/API.md#is_xid) — UAX #31 identifier rules.
+- [`is_default_ignorable`](./docs/API.md#is_default_ignorable) / [`first_default_ignorable`](./docs/API.md#first_default_ignorable): characters that render as nothing.
 - [`char_width`](./docs/API.md#char_width) / [`str_width`](./docs/API.md#str_width) — monospace display width.
 - [`normalize`](./docs/API.md#normalize) / [`is_normalized`](./docs/API.md#is_normalized) / [`Form`](./docs/API.md#form) — the four normalization forms.
 - [`UNICODE_VERSION`](./docs/API.md#unicode_version) — the UCD version the tables were built from.

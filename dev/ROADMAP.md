@@ -40,7 +40,11 @@ Not in this patch (recorded under the anti-deferral rule; each changes output or
 - **Trie tables** → 1.1, internal. Replacing the range tables (binary search over about 700 ranges for `XID_Continue`) with two-level tries changes the generator and table format, not any output. Worth doing with the buffer work and measured against these 1.0.1 numbers.
 - **Width corrections** → 1.1, documented output change. Hangul Jamo Extended-B medial and final jamo (U+D7B0–U+D7C6, U+D7CB–U+D7FB) should be zero width like U+1160–U+11FF; visible format characters (the prepended concatenation marks U+0600–U+0605, U+06DD, U+070F, U+0890–U+0891, U+08E2, U+110BD, U+110CD) should be one column, not zero. These change `char_width` for assigned code points. The 1.0 promise allows refinement for previously unassigned code points in a minor release; correcting assigned ones is a judgement call between a documented 1.1 fix and 2.0, to be decided when the work is done.
 
+## v1.1.0 - Invisible characters (DONE)
+- `is_default_ignorable` and `first_default_ignorable`, from a new `DEFAULT_IGNORABLE` table generated from `DerivedCoreProperties.txt`. Lets a lexer find zero-width joiners, Hangul fillers and other invisible characters that UAX #31 admits into identifiers.
+
 ## Later 1.x candidates (additive)
 None of these changes the frozen surface; each is a new function or type.
 - Stream-safe normalization, `Cow` normalization, scratch-buffer and trie work (above).
 - A normalization iterator adaptor over `chars()`.
+- UTS #39 identifier security: identifier status (`IdentifierStatus.txt`), resolved script sets and mixed-script detection (`Scripts.txt`, `ScriptExtensions.txt`), and confusable skeletons (`confusables.txt`). Needs those files added to the pinned UCD set.
