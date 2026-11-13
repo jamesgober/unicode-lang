@@ -17,9 +17,9 @@
 The Unicode text primitives a language front end needs — identifier rules,
 normalization, and display width — from tables generated directly from the
 Unicode Character Database, with no third-party dependencies. The whole public
-surface is eight free functions, one selector enum, and one version constant.
+surface is ten free functions, one selector enum, and one version constant.
 
-- **Version:** 1.0.1
+- **Version:** 1.1.0
 - **Unicode data:** 16.0.0 (see [`UNICODE_VERSION`](#unicode_version))
 - **MSRV:** Rust 1.85 (2024 edition)
 - **`no_std`:** yes — identifiers and width need no allocator; normalization needs `alloc`
@@ -34,6 +34,9 @@ surface is eight free functions, one selector enum, and one version constant.
   - [`is_xid_start`](#is_xid_start)
   - [`is_xid_continue`](#is_xid_continue)
   - [`is_xid`](#is_xid)
+- **[Invisible characters](#invisible)**
+  - [`is_default_ignorable`](#is_default_ignorable)
+  - [`first_default_ignorable`](#first_default_ignorable)
 - **[Display width (UAX #11)](#width)**
   - [`char_width`](#char_width)
   - [`str_width`](#str_width)
@@ -56,7 +59,7 @@ surface is eight free functions, one selector enum, and one version constant.
 As of **1.0.0** the public API documented here is **stable and frozen**.
 `unicode-lang` follows [Semantic Versioning](https://semver.org):
 
-- Nothing in the frozen surface — the eight functions, the [`Form`](#form) enum
+- Nothing in the frozen surface — the eight functions (ten since 1.1.0), the [`Form`](#form) enum
   and its variants, the [`UNICODE_VERSION`](#unicode_version) constant, the
   `std` / `alloc` / `serde` feature flags, and the `serde` representation of
   `Form` — will be removed or changed in a breaking way within the `1.x` series.
@@ -260,6 +263,74 @@ fn is_rust_ident(s: &str) -> bool {
 
 assert!(is_xid("name") && is_rust_ident("name"));
 assert!(!is_xid("_name") && is_rust_ident("_name"));
+```
+
+<br>
+<hr>
+
+<h2 id="invisible">Invisible characters</h2>
+
+Some characters render as nothing: the zero-width space and joiners, the word
+joiner, the byte order mark, the Hangul fillers, variation selectors and the tag
+characters. Unicode marks them with the `Default_Ignorable_Code_Point`
+property.
+
+UAX #31 lets several of them into identifiers. ZERO WIDTH JOINER (U+200D) and
+ZERO WIDTH NON-JOINER (U+200C) are `XID_Continue`, because some scripts need
+them, and the Hangul fillers U+3164 and U+FFA0 are `XID_Start`. So `is_xid`
+accepts `admin\u{200D}`, which looks exactly like `admin`, and a lone
+`\u{3164}`, which looks blank. NFC and NFKC keep them. A lexer that takes
+untrusted source should check each identifier it accepts with
+[`first_default_ignorable`](#first_default_ignorable) and reject or warn. The
+policy is the caller's: a language that needs ZWNJ in Persian names can allow
+that one character and still reject the rest.
+
+Mixed-script and confusable detection (UTS #39) is not provided yet.
+
+Added in 1.1.0.
+
+<br>
+
+<h3 id="is_default_ignorable"><code>is_default_ignorable</code></h3>
+
+```rust
+pub fn is_default_ignorable(c: char) -> bool
+```
+
+Returns `true` if `c` has the `Default_Ignorable_Code_Point` property. No ASCII
+character has it, and ASCII is answered without a table lookup.
+
+**Examples**
+
+```rust
+use unicode_lang::is_default_ignorable;
+
+assert!(is_default_ignorable('\u{200D}'));  // ZERO WIDTH JOINER
+assert!(is_default_ignorable('\u{FEFF}'));  // BYTE ORDER MARK
+assert!(is_default_ignorable('\u{3164}'));  // HANGUL FILLER
+assert!(!is_default_ignorable('a'));
+```
+
+<br>
+
+<h3 id="first_default_ignorable"><code>first_default_ignorable</code></h3>
+
+```rust
+pub fn first_default_ignorable(s: &str) -> Option<(usize, char)>
+```
+
+Returns the byte offset and value of the first default-ignorable character in
+`s`, or `None`. Pure-ASCII strings return `None` without decoding.
+
+**Examples**
+
+```rust
+use unicode_lang::{first_default_ignorable, is_xid};
+
+let spoofed = "admin\u{200D}";
+assert!(is_xid(spoofed));
+assert_eq!(first_default_ignorable(spoofed), Some((5, '\u{200D}')));
+assert_eq!(first_default_ignorable("admin"), None);
 ```
 
 <br>

@@ -41,6 +41,12 @@ fn main() {
     let xid_start = coalesce(collect_prop(&derived_core, "XID_Start"));
     let xid_continue = coalesce(collect_prop(&derived_core, "XID_Continue"));
 
+    // --- Default-ignorable code points ---------------------------------------
+    // Characters that render as nothing when unsupported: zero-width joiners,
+    // word joiners, the Hangul fillers, variation selectors and tags. Several
+    // are XID_Continue (or even XID_Start), so identifiers can hide them.
+    let default_ignorable = coalesce(collect_prop(&derived_core, "Default_Ignorable_Code_Point"));
+
     // --- Character width -----------------------------------------------------
     // Zero-width: nonspacing (Mn) / enclosing (Me) marks and format (Cf)
     // characters, plus the conjoining Hangul jungseong/jongseong jamo, minus
@@ -121,6 +127,12 @@ fn main() {
     emit_ranges(&mut o, "XID_CONTINUE", &xid_continue, "XID_Continue code point ranges (sorted, inclusive).");
     emit_ranges(&mut o, "ZERO_WIDTH", &zero_width, "Ranges rendered with zero display columns.");
     emit_ranges(&mut o, "WIDE", &wide, "East Asian Wide / Fullwidth ranges (two display columns).");
+    emit_ranges(
+        &mut o,
+        "DEFAULT_IGNORABLE",
+        &default_ignorable,
+        "Default_Ignorable_Code_Point ranges (sorted, inclusive).",
+    );
     emit_ranges_val(&mut o, "CCC", &ccc_ranges, "Non-zero canonical combining class, by range.");
 
     let canon_data = emit_decomp(&mut o, "CANON", &canon, "canonical");
@@ -136,11 +148,12 @@ fn main() {
 
     fs::write(OUT, o).expect("write tables.rs");
     eprintln!(
-        "wrote {OUT}: xid_start={} xid_continue={} zero={} wide={} ccc={} canon={} compat={} compose={}",
+        "wrote {OUT}: xid_start={} xid_continue={} zero={} wide={} ignorable={} ccc={} canon={} compat={} compose={}",
         xid_start.len(),
         xid_continue.len(),
         zero_width.len(),
         wide.len(),
+        default_ignorable.len(),
         ccc_ranges.len(),
         canon.len(),
         compat.len(),

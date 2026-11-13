@@ -21,6 +21,30 @@
 
 ---
 
+## [1.1.0] - 2026-11-12
+
+### Added
+
+- `is_default_ignorable(char)` and `first_default_ignorable(&str)`. They find
+  characters with the Unicode `Default_Ignorable_Code_Point` property: the
+  zero-width space and joiners, the word joiner, the byte order mark, the Hangul
+  fillers, variation selectors, tag characters and a few more. All of them
+  render as nothing.
+- A `DEFAULT_IGNORABLE` table, generated from the pinned
+  `DerivedCoreProperties.txt` like the other tables.
+
+### Security
+
+- UAX #31 admits some invisible characters into identifiers. ZERO WIDTH JOINER
+  and ZERO WIDTH NON-JOINER are `XID_Continue`, and the Hangul fillers U+3164
+  and U+FFA0 are `XID_Start`, so `is_xid` accepts `admin\u{200D}` (which looks
+  like `admin`) and a lone `\u{3164}` (which looks blank). That is what the
+  standard says, so `is_xid` does not change. A lexer that reads untrusted
+  source can now check each accepted identifier with `first_default_ignorable`
+  and reject or warn.
+
+---
+
 ## [1.0.1] - 2026-10-08
 
 Hardening patch from the LexerSketch audit. No public API change, and
@@ -136,7 +160,8 @@ Initial scaffold and repository bootstrap. No domain logic yet &mdash; this rele
 - `.github/workflows/ci.yml` CI matrix; `deny.toml`, `clippy.toml`, `rustfmt.toml`.
 - `dev/DIRECTIVES.md` and `dev/ROADMAP.md` (committed engineering standards + plan).
 
-[Unreleased]: https://github.com/jamesgober/unicode-lang/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/jamesgober/unicode-lang/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jamesgober/unicode-lang/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/jamesgober/unicode-lang/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jamesgober/unicode-lang/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/jamesgober/unicode-lang/compare/v0.1.0...v0.2.0
