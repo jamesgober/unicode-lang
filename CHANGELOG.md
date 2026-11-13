@@ -23,7 +23,7 @@
 
 ## [1.0.1] - 2026-10-08
 
-Hardening patch from the LexerSketch audit. No public API change, and
+Hardening patch from the toolchain's audit. No public API change, and
 normalization output is byte-identical (the full `NormalizationTest.txt` suite
 passes unchanged).
 
