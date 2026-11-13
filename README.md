@@ -18,7 +18,7 @@
 
 <div align="left">
     <p>
-        unicode-lang is the FEAT-tier crate: the Unicode text primitives a language front end needs — identifier rules, normalization, and display width. Part of the -lang language-construction family; see _strategy/LANG_COLLECTION.md for the master plan.
+        unicode-lang is the FEAT-tier crate: the Unicode text primitives a language front end needs — identifier rules, normalization, and display width. Part of the -lang language-construction family.
     </p>
     <br>
     <hr>
