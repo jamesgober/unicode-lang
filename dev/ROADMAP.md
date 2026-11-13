@@ -21,7 +21,7 @@ Public surface stable and frozen until 2.0.
 - [x] Full test + benchmark suite green on all three platforms.
 
 ## v1.0.1 - Hardening patch (DONE)
-Fixes from the LexerSketch audit (`_lexersketch/ISSUES.md` H11, M67, and the patch-level part of M68). No public API change, and normalization output is byte-identical: the full `NormalizationTest.txt` suite passes unchanged, and the new ordering is checked against the old one directly.
+Fixes from the toolchain's audit (the issue ledger H11, M67, and the patch-level part of M68). No public API change, and normalization output is byte-identical: the full `NormalizationTest.txt` suite passes unchanged, and the new ordering is checked against the old one directly.
 
 Delivered:
 - [x] **H11** Canonical ordering is a stable sort per run of non-starters instead of an insertion sort over the buffer. Runs already in order are only scanned; an out-of-order run is sorted once over `(class, scalar)` pairs with the standard library's stable sort, so the pass is `O(n log n)`. One base letter plus alternating U+0301 / U+0323 marks, release build: 64 000 marks went from 2.6 s to 1.4 ms, 256 000 from 57 s to 5.9 ms, and 1 000 000 marks take 24 ms (about ten minutes before, extrapolated from the measured quadratic growth). The old insertion sort is kept in the unit tests as a reference: every sequence of up to four scalars from a pool of starters and marks (including equal classes, so stability shows), plus property tests over arbitrary scalars, must order identically. `tests/adversarial.rs` normalizes a million alternating marks exactly and checks that eight times the input costs less than 24 times the time (quadratic is 64).
